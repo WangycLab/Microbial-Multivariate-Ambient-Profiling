@@ -33,6 +33,7 @@ pip install -r requirements.txt
 |---|---|
 | `numpy`, `scipy`, `pandas` | Core stats |
 | `pysam` | BAM/SAM parsing (required if your input is BAM/CRAM) |
+| `go` | index build |
 | `anndata`, `scikit-learn` | Optional, only for `mmd_load_h5ad.py` |
 | `bowtie2`, `samtools` | Optional, for the preprocessing utilities only |
 | `seqkit`, `eggNOG-mapper` | Optional, only for the one-time reference build |
@@ -73,7 +74,7 @@ emapper.py -i protein.faa --itype proteins \
 `--dbmem` loads the database into RAM (faster, needs ~30–60 GB for the full set).
 This produces `eggnog_out.emapper.annotations`.
 
-### Step 4 — build `gene_module.tsv`
+### Step 4 — build `gene_module.tsv` (KM, kegg module)
 
 ```bash
 grep -v '^#' eggnog_out.emapper.annotations \
@@ -160,7 +161,79 @@ python MVAcaller.py --build-sqlite sample.sqlite --reuse-sqlite \
 | `--build-sqlite PATH` | Build and (on rerun) reuse a SQLite molecule DB. Recommended for BAMs > ~500 MB. |
 | `--target-barcodes FILE` | Restrict testing to barcodes in this file (one per line) — useful for fast iteration on a subset. |
 
+## Quick start
 
+### 1. from SQlite built (recommended)
+
+```bash
+python MVAcaller.py \
+    -g annotation.gff3 \
+    --kegg-map gene_module.tsv \
+    --build-sqlite molecules.sqlite \
+    --reuse-sqlite \
+    -o out/mva_run \
+    --threads 16
+```
+
+### 2. In-memory mode, from bam
+
+```bash
+python MVAcaller.py \
+    -i dedup.bam \
+    -g annotation.gff3 \
+    --kegg-map gene_module.tsv \
+    -o out/mva_run \
+    --threads 16
+```
+
+### 3. Multi-species / omics mode (e.g., multi-species/ human/ mouse gut microbiomes)
+
+```bash
+python MVAcaller.py \
+    --build-sqlite molecules.sqlite \
+    --reuse-sqlite \
+    -g annotations_combined.gff3 \
+    --kegg-map gene_module.tsv \
+    -o out/mva_run \
+    --mode-omics \
+    --threads 24
+```
+
+## Output files
+
+For every run with `-o out/mva_run`, MVAcaller writes:
+
+| File | Content |
+|---|---|
+| `out/mva_run.barcodes.tsv` | One row per tested barcode (full P-value table, see below) |
+| `out/mva_run.cells.txt` | Just the barcode IDs called as cells — one per line |
+| `out/mva_run.summary.txt` | Read counts, cell counts, ambient-profile settings, thresholds used |
+
+### Columns in `*.barcodes.tsv`
+
+| Column | Description |
+|---|---|
+| `barcode` | Cell barcode |
+| `rank` | Rank by total UMI (1 = highest) |
+| `umis` | Total UMI count |
+| `rrna_umis` / `rrna_pct` | UMI count and fraction assigned to rRNA genes |
+| `ko_umis` / `non_rrna_umis` / `non_rrna_genes` | KEGG-KO, non-rRNA UMI counts and non-rRNA gene count |
+| `genes` | Total number of genes detected |
+| `ko_features` | Number of KEGG-KM features detected |
+| `call` | **`cell`** or **`empty`** |
+| `reason` | Why: `combined_padj`, `umi_retained`, `above_upper_bound`, `below_min_non_rrna_genes`, etc. |
+| `pvalue_rrnapct`, `pvalue_ko`, `pvalue_non_rrna` | Three per-test raw P-values |
+| `padj_rrnapct`, `padj_ko`, `padj_non_rrna` | Three per-test BH-adjusted P-values |
+| `pvalue_combined`, `padj_combined` | Fisher-combined raw and BH-adjusted P-values |
+| `pvalue_thre_used` | P-threshold actually applied (equals `--pvalue-thre`, or the interpolated one under `--soft-umi-thre`) |
+
+### parameters
+
+add
+
+## Repo layout
+
+add
 
 
 
