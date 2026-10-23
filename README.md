@@ -60,7 +60,7 @@ plasmids, integrons) are skipped by default; add `--keep-mobile` to retain them.
 seqkit translate ref/cds.fa > protein.faa
 ```
 
-### Step 3 — functional annotation with eggNOG-mapper
+### Step 1 — functional annotation with eggNOG-mapper
 
 ```bash
 emapper.py -i protein.faa --itype proteins \
@@ -72,7 +72,7 @@ emapper.py -i protein.faa --itype proteins \
 `--dbmem` loads the database into RAM (faster, needs ~30–60 GB for the full set).
 This produces `eggnog_out.emapper.annotations`.
 
-### Step 4 — build `gene_module.tsv` (KM, kegg module)
+### Step 2 — build `gene_module.tsv` (KM, kegg module)
 
 ```bash
 grep -v '^#' eggnog_out.emapper.annotations \
@@ -80,7 +80,7 @@ grep -v '^#' eggnog_out.emapper.annotations \
   | sed 's/^[^#]*#//' \
   > gene_module.tsv
 ```
-### Step 5 — build the gene-tagged alignment index
+### Step 3 — build the gene-tagged alignment index
 
 ```bash
 bowtie2-build ref/features.fa ref/features
@@ -94,7 +94,7 @@ bowtie2 -x ref/features -U reads.fq --very-sensitive-local -p 16 \
   | samtools sort -@ 8 -o temp.sorted.bam
 ```
 
-### Step 6 — UMI deduplication
+### Step 4 — UMI deduplication
 
 ```bash
 python mva_dedup.py -b temp.sorted.bam -c counts.tsv -d dedup.bam -o dedup.fq
@@ -109,7 +109,7 @@ One pass over the sorted BAM keeps, per barcode, the first read seen for every
 | `dedup.fq`  | the retained reads as FASTQ (for re-alignment, ambient simulation, etc.) |
 | `counts.tsv` | header + `barcode`, `reads_count`, `umi_count`, sorted by UMI count descending |
 
-### Step 7 — annotation for `--gff`
+### Step 5 — annotation for `--gff`
 
 `--gff` must be **GFF3** (it is used to pick out rRNA genes). If you only have a GTF:
 
