@@ -31,12 +31,13 @@ pip install -r requirements.txt
 
 | Package | Purpose |
 |---|---|
-| `numpy`, `scipy`, `pandas` | Core stats |
-| `pysam` | BAM/SAM parsing (required if your input is BAM/CRAM) |
-| `go` | index build |
-| `anndata`, `scikit-learn` | Optional, only for `mmd_load_h5ad.py` |
-| `bowtie2`, `samtools` | Optional, for the preprocessing utilities only |
+| `numpy`, `scipy`, `pandas` | Core statistics |
+| `pysam` | BAM/SAM parsing |
+| `anndata` | Optional, only for `.h5ad` input/output (`mva_mtx2sqlite.py`, `mva_load_h5ad.py`) |
+| `samtools` | Optional, but required when the Go builder reads a BAM |
+| `bowtie2` | Optional, only for the preprocessing utilities |
 | `seqkit`, `eggNOG-mapper` | Optional, only for the one-time reference build |
+| Go 1.19+ | Optional, to build `mva_build_sqlite` and `mva_umi_extract` |
 
 ---
 
@@ -58,9 +59,6 @@ plasmids, integrons) are skipped by default; add `--keep-mobile` to retain them.
 ```bash
 seqkit translate ref/cds.fa > protein.faa
 ```
-
-Use `seqkit translate -f 11` (bacterial/archaeal code) if your organisms use
-alternative start codons beyond the standard table.
 
 ### Step 3 — functional annotation with eggNOG-mapper
 
@@ -129,37 +127,25 @@ For multi-species datasets, concatenate (cat) the per-species GFF3s and build a 
 `MVAcaller.py` performs cell calling **directly from aligned reads**, so its input needs to be
 a **gene-tagged BAM / SAM** (optionally `.sam.gz`).
 
-# We recommend to first build SQlite indix for running MVA, which can be reused if necessarily, instead of uploaded to memory once and released after running, via
+**Build the SQLite DB once and reuse it.** It is much faster than reloading a BAM for every
+threshold change, and it is the only input needed on reruns:
 
-go build -o mva_build_sqlite mva_build_sqlite.go
-./mva_build_sqlite -i dedup.bam -o molecules.sqlite
+```bash
+go build -o mva_build_sqlite mva_build_sqlite.go  
+./mva_build_sqlite -i dedup.bam -o molecules.sqlite 
+```
 
-# We realised users may obtain the gene expression matrix or h5ad through different ways, thus an alternative approach to build index from mtx/h5ad to SQlite is provided, via:
+Users who obtain a gene expression matrix from another aligner can build the identical
+database from MTX / `.h5ad` instead:
 
+```bash
 # 10x-style triplets (raw_feature_bc_matrix)
-python mva_mtx2sqlite.py --mtx matrix.mtx.gz --barcodes barcodes.tsv.gz \
+python mva_matrix_to_sqlite.py --mtx matrix.mtx.gz --barcodes barcodes.tsv.gz \
     --features features.tsv.gz --strip-suffix=-1 -o molecules.sqlite
-    
+
 # AnnData from another aligner
-python mva_mtx2sqlite.py --h5ad raw.h5ad --strip-suffix=-1 -o molecules.sqlite
-
-# cell calling on the resulting database
-python MVAcaller.py --build-sqlite sample.sqlite --reuse-sqlite \
-    -i sample.sqlite -g annotation.gff3 --kegg-map gene_module.tsv -o out/sample
-
-
-| Flag | Description | Format |
-|---|---|---|
-| `-i, --input` | Gene-tagged BAM (sorted) or SAM (optionally `.sam.gz`) | BAM / SAM / SAM.gz |
-| `-g, --gff` | GFF3 annotation used to identify rRNA genes | GFF3 |
-| `--kegg-map` | **Two columns:** `gene_id <tab> KO_number` | plain TSV, no header |
-
-### Optional inputs
-
-| Flag | Description |
-|---|---|
-| `--build-sqlite PATH` | Build and (on rerun) reuse a SQLite molecule DB. Recommended for BAMs > ~500 MB. |
-| `--target-barcodes FILE` | Restrict testing to barcodes in this file (one per line) — useful for fast iteration on a subset. |
+python mva_matrix_to_sqlite.py --h5ad raw.h5ad --strip-suffix=-1 -o molecules.sqlite
+```
 
 ## Quick start
 
@@ -227,13 +213,78 @@ For every run with `-o out/mva_run`, MVAcaller writes:
 | `pvalue_combined`, `padj_combined` | Fisher-combined raw and BH-adjusted P-values |
 | `pvalue_thre_used` | P-threshold actually applied (equals `--pvalue-thre`, or the interpolated one under `--soft-umi-thre`) |
 
-### parameters
+## Parameters
 
-add
+### Ambient profile
+
+| Flag | Default | Description |
+|---|---|---|
+| `--ind-min` | auto | Start rank (inclusive) of the ambient window. Auto = Q3 rank, i.e. the bottom 25% of barcodes by UMI |
+| `--ind-max` | 570000000 | End rank (inclusive); effectively the end of the tail |
+| `--ambient-pseudocount` | 1.0 | Pseudocount added to the ambient profile |
+
+### Statistics
+
+| Flag | Default | Description |
+|---|---|---|
+| `--pvalue-thre` | 0.01 | Combined P threshold (post-BH) for calling cells |
+| `--sim-n` | 10000 | Multinomial simulations per barcode |
+| `--threads` | 1 | Worker threads for the simulations |
+| `--seed` | 19760110 | Random seed |
+| `--no-bh` | off | Call cells on the raw Fisher P instead of the BH-adjusted value |
+| `--mode-omics` | off | Use a total-RNA test as the third test; `--umi-lower` defaults to 100 |
+
+### UMI thresholds
+
+| Flag | Default | Description |
+|---|---|---|
+| `--umi-lower` | 300 (100 with `--mode-omics`) | Barcodes with UMI ≤ this are skipped as empty |
+| `--umi-upper` | 10000 | Barcodes with UMI ≥ this are called as cells without computing P |
+| `--umi-thre` | off | Barcodes above this are forced to cell (P = 0) but still enter BH correction |
+| `--min-non-rrna-genes` | 0 (off) | Skip barcodes with fewer detected non-rRNA genes |
+| `--soft-umi-thre` | **on** | Slide the P threshold along log(UMI): stricter for low-UMI barcodes. Disable with `--no-soft-umi-thre` |
+| `--soft-umi-low` / `--soft-umi-high` | 100 / 1000 | UMI anchors between which the threshold is interpolated |
+| `--soft-thre-low` / `--soft-thre-high` | 1e-5 / 0.01 | Threshold at the low and high anchors |
+
+### BAM/SAM parsing
+
+| Flag | Default | Description |
+|---|---|---|
+| `--qname-simple` | **on** | Parse `..._<BC>_<UMI>` from the read name. Disable with `--no-qname-simple` |
+| `--qname-regex` | `_(?P<cb>[ACGTN]+)_(?P<umi>[ACGTN]+)$` | Regex used when `--qname-simple` is off |
+| `--use-cb-tag` | off | Read CB/UMI from SAM tags (`CB:Z:` plus `UB:Z:` / `UR:Z:`) instead of the name |
+| `--gene-delimiter` | `#` | Delimiter between contig and gene ID in RNAME |
+| `--min-mapq` | 0 | Minimum MAPQ |
+| `--keep-secondary` | off | Keep secondary / supplementary alignments |
+
+### Other
+
+| Flag | Default | Description |
+|---|---|---|
+| `--multi-ko` | `split` | Genes annotated to several KOs: `split` (counts split equally), `first`, `drop` |
+| `--batch-size` | 200000 | SQLite insert batch size |
+| `--progress-every` | 1000000 | Progress line every N reads; 0 disables |
+| `--log-likelihood` | off | Write per-barcode log-multinomial likelihood to `<prefix>.loglik.tsv` |
 
 ## Repo layout
 
-add
+```
+MVAcaller/
+├── MVAcaller.py                main cell-calling program
+├── mva_mtx2sqlite.py     raw MTX / .h5ad / molecule table → SQLite
+├── mva_build_sqlite.go         fast BAM/SAM → SQLite builder (optional, Go)
+├── mva_umi_extract.go          R1 BC/UMI → R2 header extraction (optional, Go)
+├── mva_extract_features.py     CDS / tRNA / rRNA / ncRNA extraction + gene-tagged FASTA
+├── mva_dedup.py                UMI deduplication (BAM → dedup.bam / .fq / counts.tsv)
+├── mva_gtf2gff3.py          GTF → GFF3 conversion
+├── mva_knee.py                 knee / inflection point on counts.tsv
+├── mva_rank_target.py          rank-based barcode subsetting and UMI targets
+├── mva_load_h5ad.py            sparse TSV → AnnData (.h5ad) for Scanpy
+├── mva_bam_to_mat.py           gene-tagged BAM → sparse count matrix
+├── benchmarks/                 paper-reproduction scripts on simulated datasets
+├── requirements.txt
+└── LICENSE
+```
 
 
 
