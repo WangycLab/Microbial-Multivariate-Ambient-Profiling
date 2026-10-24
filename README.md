@@ -32,7 +32,7 @@ pip install -r requirements.txt
 | `anndata` | `.h5ad` input / output |
 | `bowtie2`, `samtools` | FASTQ → BAM (alignment path only) |
 | `seqkit`, `eggNOG-mapper` | building the gene → KEGG map |
-| Go 1.19+ | `mva_umi_extract`, `mva_build_sqlite` (optional, faster) |
+| Go 1.19+ | `mva_umi_extract`, `mva_build_sqlite`|
 
 ---
 
