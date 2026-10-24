@@ -1,0 +1,6 @@
+numpy>=1.21
+scipy>=1.7
+pandas>=1.3
+pysam>=0.19        # for BAM parsing; required when your input is BAM/CRAM
+anndata>=0.7       # only needed by mva_load_h5ad.py
+scikit-learn>=1.0  # only needed by mva_load_h5ad.py
